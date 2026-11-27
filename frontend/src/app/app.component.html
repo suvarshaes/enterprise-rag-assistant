@@ -1,0 +1,177 @@
+<main class="app-shell">
+  <header class="hero">
+    <div class="eyebrow"><span class="eyebrow-dot"></span> RESEARCH WORKSPACE</div>
+    <h1>Answers you can trace.</h1>
+    <p>Explore your clinical and financial PDFs, ask a question, and inspect the sources behind every answer.</p>
+    <div class="hero-tags">
+      <span>PDF knowledge base</span>
+      <span>Source-backed answers</span>
+    </div>
+  </header>
+
+  <div *ngIf="successMessage" class="notice notice-success" role="status" aria-live="polite">
+    <span class="notice-icon" aria-hidden="true">✓</span>
+    <span>{{ successMessage }}</span>
+    <button class="notice-dismiss" type="button" aria-label="Dismiss message" (click)="successMessage = null">×</button>
+  </div>
+
+  <div *ngIf="errorMessage" class="notice notice-error" role="alert">
+    <span class="notice-icon" aria-hidden="true">!</span>
+    <span>{{ errorMessage }}</span>
+    <button class="notice-dismiss" type="button" aria-label="Dismiss message" (click)="errorMessage = null">×</button>
+  </div>
+
+  <div class="workspace">
+    <section class="panel upload-panel" aria-labelledby="upload-heading">
+      <div class="section-heading">
+        <span class="step-number">01</span>
+        <div>
+          <h2 id="upload-heading">Add a document</h2>
+          <p>Choose the category for this PDF. It also sets the default question scope.</p>
+        </div>
+      </div>
+
+      <div class="upload-fields">
+        <div class="field">
+          <label for="domain">Upload category</label>
+          <select id="domain" [ngModel]="selectedDomain" (ngModelChange)="onDomainChanged($event)" [disabled]="uploading">
+            <option value="ClinicalTrial">Clinical trial</option>
+            <option value="FinancialReport">Financial report</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="pdf-file">Choose a PDF</label>
+          <input
+            #fileInput
+            id="pdf-file"
+            class="file-input"
+            type="file"
+            accept=".pdf,application/pdf"
+            [disabled]="uploading"
+            (change)="onFileSelected($event)"
+          />
+          <p class="field-hint">PDF files only.</p>
+          <p *ngIf="fileToUpload" class="selected-file">
+            <span aria-hidden="true">↳</span> {{ fileToUpload.name }}
+          </p>
+        </div>
+      </div>
+
+      <button class="button button-primary" style="min-width: 220px" type="button" (click)="uploadFile()" [disabled]="!fileToUpload || uploading">
+        <span *ngIf="uploading" class="spinner" aria-hidden="true"></span>
+        {{ uploadStage === 'indexing' ? 'Indexing PDF…' : uploading ? 'Uploading PDF…' : 'Upload and index PDF' }}
+      </button>
+      <div *ngIf="uploading" class="upload-progress" role="status" aria-live="polite">
+        <p>{{ uploadStage === 'indexing' ? 'PDF received. Extracting content, creating searchable chunks, and saving them…' : 'Sending your PDF to the API…' }}</p>
+        <progress *ngIf="uploadStage === 'uploading' && uploadProgressPercent !== null" [value]="uploadProgressPercent" max="100">{{ uploadProgressPercent }}%</progress>
+        <progress *ngIf="uploadStage === 'indexing'" max="100"></progress>
+        <span *ngIf="uploadStage === 'uploading' && uploadProgressPercent !== null" class="field-hint">{{ uploadProgressPercent }}% uploaded</span>
+      </div>
+      <p *ngIf="!uploading" class="button-hint">The document becomes searchable after indexing finishes.</p>
+    </section>
+
+    <section class="panel question-panel" aria-labelledby="question-heading">
+      <div class="section-heading">
+        <span class="step-number">02</span>
+        <div>
+          <h2 id="question-heading">Ask your documents</h2>
+          <p>Get a clear answer with references you can verify.</p>
+        </div>
+      </div>
+
+      <div *ngIf="documentsError" class="inline-error" role="alert">
+        <p>{{ documentsError }}</p>
+        <button class="button button-secondary" type="button" (click)="loadDocuments()">Retry loading documents</button>
+      </div>
+
+      <div class="field">
+        <label for="document-filter">Search in</label>
+        <select id="document-filter" [(ngModel)]="filterDocumentId" [disabled]="documentsLoading || !!documentsError || questionScopeDocuments.length === 0">
+          <option [ngValue]="null">All ready {{ selectedDomain === 'ClinicalTrial' ? 'clinical trial' : 'financial report' }} documents</option>
+          <option *ngFor="let doc of questionScopeDocuments" [ngValue]="doc.documentId">
+            {{ doc.fileName }} · {{ doc.uploadedAt | date:'short' }} · ID {{ doc.documentId.slice(0, 8) }}
+          </option>
+        </select>
+        <p *ngIf="documentsLoading" class="field-hint">Loading available documents…</p>
+        <p *ngIf="!documentsLoading && !documentsError && documents.length === 0" class="field-hint">No uploads yet. Add a PDF above, then it will appear here after indexing.</p>
+        <p *ngIf="!documentsLoading && !documentsError && documents.length > 0 && questionScopeDocuments.length === 0" class="field-hint">No ready {{ selectedDomain === 'ClinicalTrial' ? 'clinical trial' : 'financial report' }} documents. Change the upload category above, or upload and index a document first.</p>
+        <p *ngIf="selectedDocument" class="field-hint">Searching only this upload · uploaded {{ selectedDocument.uploadedAt | date:'medium' }} · ID {{ selectedDocument.documentId }}</p>
+        <p *ngIf="!filterDocumentId && questionScopeDocuments.length > 0 && !documentsLoading" class="field-hint">“All ready … documents” searches every indexed document in this upload category.</p>
+      </div>
+
+      <label class="sr-only" for="question">Your question</label>
+      <textarea
+        id="question"
+        rows="4"
+        [(ngModel)]="question"
+        placeholder="For example: What was the primary endpoint result?"
+        [disabled]="asking"
+      ></textarea>
+
+      <div class="question-footer">
+        <p class="field-hint">Try asking about results, risks, trends, or key figures.</p>
+        <button class="button button-primary" type="button" (click)="askQuestion()" [disabled]="!question.trim() || asking || !canAskQuestion">
+          <span *ngIf="asking" class="spinner" aria-hidden="true"></span>
+          {{ asking ? 'Finding an answer…' : 'Ask a question' }}
+          <span *ngIf="!asking" aria-hidden="true">→</span>
+        </button>
+      </div>
+
+      <div *ngIf="asking" class="working-state" role="status" aria-live="polite">
+        <span class="spinner spinner-dark" aria-hidden="true"></span>
+        Searching your documents and preparing an answer…
+      </div>
+
+        </section>
+
+        <section *ngIf="response && !asking" class="panel answer-panel" aria-labelledby="answer-heading">
+          <article>
+            <div class="answer-heading">
+              <div>
+                <span class="answer-kicker">03 · RESULT</span>
+                <h2 id="answer-heading">Answer</h2>
+              </div>
+              <span class="source-count" *ngIf="response.citations.length">
+                {{ response.citations.length }} {{ response.citations.length === 1 ? 'source' : 'sources' }}
+              </span>
+            </div>
+            <div class="submitted-question">
+              <span class="answer-kicker">You asked</span>
+              <p>{{ submittedQuestion }}</p>
+            </div>
+            <p class="answer-text">{{ response.answer }}</p>
+
+            <div *ngIf="response.citations.length" class="citations">
+              <h4>Sources</h4>
+              <div class="citation-list">
+                <button
+                  *ngFor="let citation of response.citations"
+                  type="button"
+                  class="citation-button"
+                  [class.active]="activeCitation?.citation_id === citation.citation_id"
+                  [attr.aria-pressed]="activeCitation?.citation_id === citation.citation_id"
+                  (click)="activeCitation = citation"
+                >
+                  <span class="citation-id">[{{ citation.citation_id }}]</span>
+                  <span>{{ citation.file_name }}</span>
+                  <span class="citation-page">p. {{ citation.page_number }}</span>
+                </button>
+              </div>
+            </div>
+            <p *ngIf="!response.citations.length" class="no-citations">No source references were returned for this answer.</p>
+
+            <div *ngIf="activeCitation" class="evidence-card">
+              <div class="evidence-heading">
+                <strong>[{{ activeCitation.citation_id }}] {{ activeCitation.file_name }}</strong>
+                <span>Page {{ activeCitation.page_number }}</span>
+              </div>
+              <p *ngIf="activeCitation.section_title" class="section-label">{{ activeCitation.section_title }}</p>
+              <p class="evidence-excerpt">{{ activeCitation.excerpt }}</p>
+            </div>
+          </article>
+        </section>
+      </div>
+
+  <footer class="page-footer">Answers are generated from your indexed documents. Verify important details against the cited source.</footer>
+</main>
